@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
+      - name: vet
+        run: go vet ./...
+      - name: build
+        run: go build ./...
+      - name: cross-build (darwin)
+        run: GOOS=darwin GOARCH=arm64 go build ./...
+      - name: test
+        run: go test ./... -count=1
+
+  reflink:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: mount loopback XFS (reflink=1)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xfsprogs
+          truncate -s 2G /tmp/xfs.img
+          mkfs.xfs -m reflink=1 -q /tmp/xfs.img
+          sudo mkdir -p /mnt/xfs
+          sudo mount -o loop /tmp/xfs.img /mnt/xfs
+          sudo chmod 1777 /mnt/xfs
+      - name: test (reflink required)
+        run: TMPDIR=/mnt/xfs COWDIFF_REQUIRE_REFLINK=1 go test ./... -count=1
